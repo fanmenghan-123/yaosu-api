@@ -1,0 +1,45 @@
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+import pandas as pd
+import json
+from difflib import SequenceMatcher
+
+app = FastAPI()
+
+# 允许跨域（让 Coze 能访问）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 加载要素库
+core_yaosu_df = pd.read_excel("yaosu_41.xlsx")  # 改为支持xlsx
+
+def match_yaosu(text, yaosu_df, topn=3):
+    matches = []
+    for _, row in yaosu_df.iterrows():
+        score = SequenceMatcher(None, text, str(row["关键词"])).ratio()
+        matches.append((row["要素名称"], row["关键词"], score))
+    sorted_matches = sorted(matches, key=lambda x: x[2], reverse=True)[:topn]
+    return sorted_matches
+
+@app.post("/match_yaosu")
+async def match_api(request: Request):
+    data = await request.json()
+    zh_info = data.get("zh_info", {})
+    results = []
+    for key, val in zh_info.items():
+        if key == "证候名称":
+            continue
+        matches = match_yaosu(val, core_yaosu_df)
+        for name, kw, score in matches:
+            results.append({
+                "要素名称": name,
+                "匹配字段": f"{key}：{val}",
+                "关键词": kw,
+                "匹配度": round(score, 2),
+                "来源证候信息": zh_info.get("证候名称", "")
+            })
+    return results
